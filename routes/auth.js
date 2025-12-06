@@ -1,6 +1,7 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import pool from '../config/database.js';
 import dotenv from 'dotenv';
 
@@ -32,6 +33,16 @@ router.post('/', async (req, res) => {
 
     if (!validPassword) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+
+    // Si el usuario no tiene offline_password, calcularlo y guardarlo
+    if (!user.offline_password) {
+      const offlinePassword = crypto.createHash('md5').update(password).digest('hex');
+      await pool.query(
+        'UPDATE usuarios SET offline_password = $1 WHERE id = $2',
+        [offlinePassword, user.id]
+      );
+      console.log(`✅ offline_password calculado y guardado para usuario ${user.username}`);
     }
 
     const token = jwt.sign(
