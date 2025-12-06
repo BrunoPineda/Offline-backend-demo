@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import pool from '../config/database.js';
 import dotenv from 'dotenv';
 
@@ -22,10 +23,12 @@ const createUser = async () => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    // Calcular MD5 para login offline
+    const offlinePassword = crypto.createHash('md5').update(password).digest('hex');
 
     const result = await pool.query(
-      'INSERT INTO usuarios (username, password, email, created_at) VALUES ($1, $2, $3, NOW()) RETURNING id, username, email',
-      [username, hashedPassword, email]
+      'INSERT INTO usuarios (username, password, email, offline_password, created_at) VALUES ($1, $2, $3, $4, NOW()) RETURNING id, username, email',
+      [username, hashedPassword, email, offlinePassword]
     );
 
     console.log('✅ Usuario creado exitosamente:');
