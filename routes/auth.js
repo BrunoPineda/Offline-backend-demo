@@ -35,15 +35,14 @@ router.post('/', async (req, res) => {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
-    // Si el usuario no tiene offline_password, calcularlo y guardarlo
-    if (!user.offline_password) {
-      const offlinePassword = crypto.createHash('md5').update(password).digest('hex');
-      await pool.query(
-        'UPDATE usuarios SET offline_password = $1 WHERE id = $2',
-        [offlinePassword, user.id]
-      );
-      console.log(`✅ offline_password calculado y guardado para usuario ${user.username}`);
-    }
+    // Siempre actualizar offline_password con la contraseña actual (por si cambió)
+    // Esto permite que el login offline funcione con la contraseña más reciente
+    const offlinePassword = crypto.createHash('md5').update(password).digest('hex');
+    await pool.query(
+      'UPDATE usuarios SET offline_password = $1 WHERE id = $2',
+      [offlinePassword, user.id]
+    );
+    console.log(`✅ offline_password actualizado para usuario ${user.username} (MD5: ${offlinePassword})`);
 
     const token = jwt.sign(
       { id: user.id, username: user.username },
