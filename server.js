@@ -6,11 +6,18 @@ import cors from 'cors';
 // database.js ya carga dotenv internamente
 import pool from './config/database.js';
 
-// Importar rutas
-import authRoutes from './routes/auth.js';
-import usuariosRoutes from './routes/usuarios.js';
-import productosRoutes from './routes/productos.js';
-import syncRoutes from './routes/sync.js';
+// Importar APIs
+import authRoutes from './api/auth.js';
+import usuariosRoutes from './api/usuarios.js';
+import productosRoutes from './api/productos.js';
+import syncRoutes from './api/sync.js';
+import formulariosRoutes from './api/formularios.js';
+import seccionesRoutes from './api/secciones.js';
+import seccionesStandaloneRoutes from './api/secciones-standalone.js';
+import camposRoutes from './api/campos.js';
+import camposStandaloneRoutes from './api/campos-standalone.js';
+import rolesRoutes from './api/roles.js';
+import respuestasRoutes from './api/respuestas.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -33,35 +40,23 @@ app.use((req, res, next) => {
   next();
 });
 
-// Crear tablas si no existen
-const createTables = async () => {
+// Verificar que las tablas existan (no las crea, solo verifica)
+// Las tablas deben ser creadas ejecutando el script create_oracle_schema.sql
+const verifyTables = async () => {
   try {
-    // Tabla de usuarios
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS usuarios (
-        id SERIAL PRIMARY KEY,
-        username VARCHAR(50) UNIQUE NOT NULL,
-        password VARCHAR(255) NOT NULL,
-        email VARCHAR(100) UNIQUE NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW()
-      )
-    `);
+    // Verificar tabla de usuarios
+    await pool.query('SELECT COUNT(*) FROM IDO_FORMULARIO.CBTC_USUARIOS');
+    console.log('✅ Tabla IDO_FORMULARIO.CBTC_USUARIOS existe');
 
-    // Tabla de productos
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS productos (
-        id SERIAL PRIMARY KEY,
-        nombre VARCHAR(30) NOT NULL,
-        precio DECIMAL(10, 2) NOT NULL,
-        cantidad INTEGER NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      )
-    `);
+    // Verificar tabla de productos
+    await pool.query('SELECT COUNT(*) FROM IDO_FORMULARIO.CBTC_PRODUCTOS');
+    console.log('✅ Tabla IDO_FORMULARIO.CBTC_PRODUCTOS existe');
 
-    console.log('✅ Tablas creadas o ya existen');
+    console.log('✅ Todas las tablas verificadas correctamente');
   } catch (error) {
-    console.error('❌ Error al crear tablas:', error);
+    console.error('❌ Error al verificar tablas:', error);
+    console.error('   Asegúrate de ejecutar el script create_oracle_schema.sql primero');
+    throw error;
   }
 };
 
@@ -70,10 +65,17 @@ app.use('/login', authRoutes);
 app.use('/usuarios', usuariosRoutes);
 app.use('/productos', productosRoutes);
 app.use('/sync', syncRoutes);
+app.use('/formularios', formulariosRoutes);
+app.use('/formularios', seccionesRoutes); // /formularios/:id_formulario/secciones
+app.use('/secciones', seccionesStandaloneRoutes); // /secciones/:id (PUT, DELETE)
+app.use('/secciones', camposRoutes); // /secciones/:id_seccion/campos
+app.use('/campos', camposStandaloneRoutes); // /campos/:id (PUT, DELETE)
+app.use('/roles', rolesRoutes); // /roles
+app.use('/respuestas', respuestasRoutes); // /respuestas
 
 // Ruta de prueba
 app.get('/', (req, res) => {
-  res.json({ message: 'API del Sistema Offline funcionando' });
+  res.json({ message: 'API del Sistema Offline funcionando con Oracle' });
 });
 
 // Socket.io - Sincronización en tiempo real
@@ -89,9 +91,9 @@ io.on('connection', (socket) => {
 setInterval(async () => {
   try {
     const result = await pool.query(
-      'SELECT COUNT(*) as total FROM productos'
+      'SELECT COUNT(*) as total FROM IDO_FORMULARIO.CBTC_PRODUCTOS'
     );
-    console.log(`📊 Sincronización programada - Total productos: ${result.rows[0].total}`);
+    console.log(`📊 Sincronización programada - Total productos: ${result.rows[0].TOTAL}`);
     io.emit('sync_programada', { timestamp: new Date().toISOString() });
   } catch (error) {
     console.error('Error en sincronización programada:', error);
@@ -101,10 +103,13 @@ setInterval(async () => {
 // Inicializar servidor
 const startServer = async () => {
   try {
-    await createTables();
+    // Esperar a que el pool esté inicializado
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    await verifyTables();
     httpServer.listen(PORT, () => {
       console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
       console.log(`📡 Socket.io disponible en ws://localhost:${PORT}`);
+      console.log(`🗄️  Base de datos: Oracle (IDO_FORMULARIO)`);
     });
   } catch (error) {
     console.error('❌ Error al iniciar servidor:', error);
@@ -112,5 +117,19 @@ const startServer = async () => {
   }
 };
 
-startServer();
+// Manejar cierre graceful
+process.on('SIGINT', async () => {
+  console.log('\n🛑 Cerrando servidor...');
+  try {
+    await pool.end();
+    httpServer.close(() => {
+      console.log('✅ Servidor cerrado correctamente');
+      process.exit(0);
+    });
+  } catch (error) {
+    console.error('Error al cerrar:', error);
+    process.exit(1);
+  }
+});
 
+startServer();

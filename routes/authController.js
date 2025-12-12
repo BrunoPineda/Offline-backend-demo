@@ -1,4 +1,3 @@
-import express from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
@@ -7,10 +6,8 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const router = express.Router();
-
-// POST /login
-router.post('/', async (req, res) => {
+// Función para realizar login
+export const login = async (req, res) => {
   try {
     const { username, password } = req.body;
 
@@ -18,10 +15,14 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
     }
 
-    // Buscar por username o email
+    // Buscar por username o email con su rol
     const result = await pool.query(
-      'SELECT * FROM usuarios WHERE username = $1 OR email = $1',
-      [username]
+      `SELECT u.ID_USUARIO, u.NO_USERNAME, u.DI_CORREO, u.CO_PASSWORD_HASH, u.ID_ROL, 
+              r.NO_ROL as ROL_NOMBRE
+       FROM IDO_FORMULARIO.CBTC_USUARIOS u
+       LEFT JOIN IDO_FORMULARIO.CBTC_ROLES r ON u.ID_ROL = r.ID_ROL
+       WHERE u.NO_USERNAME = :1 OR u.DI_CORREO = :2`,
+      [username, username]
     );
 
     if (result.rows.length === 0) {
@@ -29,7 +30,7 @@ router.post('/', async (req, res) => {
     }
 
     const user = result.rows[0];
-    const validPassword = await bcrypt.compare(password, user.password);
+    const validPassword = await bcrypt.compare(password, user.CO_PASSWORD_HASH);
 
     if (!validPassword) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
@@ -39,13 +40,13 @@ router.post('/', async (req, res) => {
     // Esto permite que el login offline funcione con la contraseña más reciente
     const offlinePassword = crypto.createHash('md5').update(password).digest('hex');
     await pool.query(
-      'UPDATE usuarios SET offline_password = $1 WHERE id = $2',
-      [offlinePassword, user.id]
+      'UPDATE IDO_FORMULARIO.CBTC_USUARIOS SET CO_OFFLINE_PASSWORD = :1 WHERE ID_USUARIO = :2',
+      [offlinePassword, user.ID_USUARIO]
     );
-    console.log(`✅ offline_password actualizado para usuario ${user.username} (MD5: ${offlinePassword})`);
+    console.log(`✅ offline_password actualizado para usuario ${user.NO_USERNAME} (MD5: ${offlinePassword})`);
 
     const token = jwt.sign(
-      { id: user.id, username: user.username },
+      { id: user.ID_USUARIO, username: user.NO_USERNAME, rol: user.ROL_NOMBRE },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
@@ -53,16 +54,16 @@ router.post('/', async (req, res) => {
     res.json({
       token,
       user: {
-        id: user.id,
-        username: user.username,
-        email: user.email
+        id: user.ID_USUARIO,
+        username: user.NO_USERNAME,
+        email: user.DI_CORREO,
+        id_rol: user.ID_ROL,
+        rol_nombre: user.ROL_NOMBRE
       }
     });
   } catch (error) {
     console.error('Error en login:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
-});
-
-export default router;
+};
 
